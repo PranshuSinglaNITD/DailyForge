@@ -33,6 +33,25 @@ const getAuthCookieOptions = () => {
   return cookieOptions;
 };
 
+//reduces redudancy as this peice of code is being called in login, signup and googellogin
+const sendAuthResponse = (res, statusCode, user, message) => {
+  const jwtSecret = getJwtSecret(res);
+  if (!jwtSecret) return; // Error already handled in getJwtSecret
+
+  const token = jwt.sign({ userId: user._id }, jwtSecret, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+    algorithm: JWT_ALGORITHM,
+  });
+
+  return res
+    .status(statusCode)
+    .cookie('token', token, getAuthCookieOptions())
+    .json({
+      message,
+      user: { _id: user._id, name: user.name, email: user.email },
+    });
+};
+
 // sign up function
 export const signup = async (req, res) => {
   try {
@@ -72,24 +91,7 @@ export const signup = async (req, res) => {
     // save the new user in database
     await newUser.save();
 
-    const jwtSecret = getJwtSecret(res);
-    if (!jwtSecret) {
-      return;
-    }
-
-    // generate token using jwt
-    const token = jwt.sign({ userId: newUser._id }, jwtSecret, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '24h',
-      algorithm: JWT_ALGORITHM,
-    });
-
-    return res
-      .status(201)
-      .cookie('token', token, getAuthCookieOptions())
-      .json({
-        message: 'User registered successfully',
-        user: { _id: newUser._id, name: newUser.name, email: newUser.email },
-      });
+    return sendAuthResponse(res, 201, newUser, 'User registered successfully');
   } catch (error) {
     // error handling
     console.error('Signup error:', error);
@@ -111,7 +113,9 @@ export const login = async (req, res) => {
     }
 
     // check if user exists or not
-    const user = await User.findOne({ email });
+    //if the user has signed up with abc@gmail.com and in phone by mistake he write Abc@gmail.com then it could be login
+    const emailToLower=email.toLowerCase();
+    const user = await User.findOne({ email:emailToLower });
     if (!user) {
       return res.status(409).json({ message: 'User does not exist' });
     }
@@ -122,28 +126,7 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Password does not match' });
     }
 
-    const jwtSecret = getJwtSecret(res);
-    if (!jwtSecret) {
-      return;
-    }
-
-    // generate jwt token
-    // check JWT_SECRET is configured
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET is not set in environment variables");
-      return res.status(500).json({ message: "Server configuration error" });
-    }
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: '24h',
-    });
-
-    return res
-      .status(200)
-      .cookie('token', token, getAuthCookieOptions())
-      .json({
-        message: 'Login successful',
-        user: { _id: user._id, name: user.name, email: user.email },
-      });
+    return sendAuthResponse(res, 200, user, 'Login successful');
   } catch (error) {
     // error handling
     console.log('Login error: ', error);
@@ -289,30 +272,8 @@ export const googleLogin = async (req, res) => {
     } else {
       console.log(`[GOOGLE AUTH] Logged in existing user: ${email}`);
     }
-
-    // Generate JWT token (matches standard custom auth format)
-    const jwtSecret = getJwtSecret(res);
-    if (!jwtSecret) {
-      return;
-    }
-
-    const token = jwt.sign({ userId: user._id }, jwtSecret, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '24h',
-      algorithm: JWT_ALGORITHM,
-    });
-
-    // Write token to HTTP-Only Cookie
-    return res
-      .status(200)
-      .cookie('token', token, getAuthCookieOptions())
-      .json({
-        message: 'Google sign-in successful',
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-        },
-      });
+    return sendAuthResponse(res, 200, user, 'Google sign-in successful');
+    
   } catch (error) {
     console.error('[GOOGLE AUTH] Controller error:', error);
     return res.status(500).json({ message: 'Server error during Google authentication' });
